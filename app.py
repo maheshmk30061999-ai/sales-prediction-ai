@@ -1,0 +1,239 @@
+
+from pathlib import Path
+
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parent
+
+st.set_page_config(page_title="Sales Prediction AI", page_icon="📈", layout="wide")
+st.title("Sales Prediction AI - Rossmann Dashboard")
+st.caption("Random Forest | Store Sales Analysis | 12-Week Scenario Forecast")
+
+
+if not (ROOT / "model.pkl").exists():
+    st.error("model.pkl is missing. Copy your Colab-trained model.pkl next to app.py.")
+    st.stop()
+try:
+    model = joblib.load(ROOT / "model.pkl")
+except Exception as exc:
+    st.error(f"Could not load model.pkl. Check training and app library versions: {exc}")
+    st.stop()
+
+if not (ROOT / "stores.csv").exists():
+    st.error("stores.csv is missing. Copy the file generated in your Colab notebook.")
+    st.stop()
+stores_df = pd.read_csv(ROOT / "stores.csv")
+if "Store" not in stores_df.columns:
+    st.error("stores.csv should contain a Store column.")
+    st.stop()
+stores = sorted(stores_df["Store"].dropna().astype(int).unique().tolist())
+if not stores:
+    st.error("stores.csv contains no stores.")
+    st.stop()
+
+analysis_tab, predict_tab, forecast_tab, results_tab = st.tabs([
+    "Sales Dashboard", "Predict Sales", "12-Week Forecast", "Model Results"
+])
+
+# ------------------------------- SALES DASHBOARD -----------------------------
+with analysis_tab:
+    st.subheader("Explore historical sales data")
+    uploaded_file = st.file_uploader("Upload your Rossmann train.csv", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file, low_memory=False)
+            needed = {"Store", "Date", "Sales"}
+            if not needed.issubset(df.columns):
+                st.error("Historical CSV needs Store, Date and Sales columns.")
+            else:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+                df["Sales"] = pd.to_numeric(df["Sales"], errors="coerce")
+                df = df.dropna(subset=["Date", "Sales", "Store"])
+                if df.empty:
+                    st.warning("No valid rows in this historical CSV.")
+                else:
+                    store_choice = st.selectbox(
+                        "Select store", ["All Stores"] + sorted(df["Store"].unique().tolist())
+                    )
+                    if store_choice != "All Stores":
+                        df = df[df["Store"] == store_choice]
+                    a, b, c = st.columns(3)
+                    a.metric("Total Sales", f"{df['Sales'].sum():,.0f}")
+                    b.metric("Average Store-Day Sales", f"{df['Sales'].mean():,.0f}")
+                    c.metric("Rows", f"{len(df):,}")
+                    st.markdown("**Historical daily sales trend**")
+                    daily = df.groupby("Date")["Sales"].sum().sort_index()
+                    st.line_chart(daily)
+                    st.markdown("**Store-wise total sales**")
+                    st.bar_chart(df.groupby("Store")["Sales"].sum())
+                    st.dataframe(df.head(100), use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.error(f"Could not read historical CSV: {exc}")
+    else:
+        st.info("Upload train.csv to see your historical sales charts.")
+
+# --------------------------------- PREDICTION -------------------------------
+with predict_tab:
+    st.subheader("Single-day sales prediction")
+    with st.form("predict_sales_form"):
+        store = st.selectbox("Store", stores)
+        date = st.date_input("Prediction Date", value=pd.Timestamp("2015-08-01").date())
+        open_flag = st.selectbox("Is store open?", [1, 0])
+        promo = st.selectbox("Promotion active?", [0, 1])
+        state_holiday = st.selectbox("State holiday", ["0", "a", "b", "c"])
+        school_holiday = st.selectbox("School holiday?", [0, 1])
+        submitted = st.form_submit_button("Predict Sales")
+    if submitted:
+        date = pd.Timestamp(date)
+        data = pd.DataFrame([{
+            "Store": store,
+            "DayOfWeek": date.dayofweek + 1,
+            "Open": open_flag,
+            "Promo": promo,
+            "StateHoliday": {"0": 0, "a": 1, "b": 2, "c": 3}[state_holiday],
+            "SchoolHoliday": school_holiday,
+            "Year": date.year,
+            "Month": date.month,
+            "Day": date.day,
+            "WeekOfYear": int(date.isocalendar().week),
+        }])
+        try:
+            predicted = float(model.predict(data)[0])
+            if open_flag == 0:
+                predicted = 0.0
+            st.metric("Estimated Sales", f"{max(predicted, 0):,.2f}")
+            st.caption("Based on historical sales and selected conditions. This is an estimate.")
+            if date.year > 2015:
+                st.warning("The Rossmann dataset is historical. Future-date estimates are illustrative.")
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
+
+# --------------------------------- FORECAST ---------------------------------
+with forecast_tab:
+    st.subheader("Next 12 Weeks - Scenario Forecast")
+    weekly_path = ROOT / "weekly_forecast.csv"
+    if not weekly_path.exists():
+        st.info("weekly_forecast.csv is missing. Export it from your Colab notebook.")
+    else:
+        weekly = pd.read_csv(weekly_path)
+        needed = {"Store", "WeekNumber", "Predicted_Weekly_Sales"}
+        if not needed.issubset(weekly.columns) or weekly.empty:
+            st.warning("weekly_forecast.csv needs Store, WeekNumber, Predicted_Weekly_Sales.")
+        else:
+            chosen = st.selectbox(
+                "Select a store", sorted(weekly["Store"].unique().tolist()), key="weekly_store"
+            )
+            view = weekly[weekly["Store"] == chosen].sort_values("WeekNumber")
+            st.metric("12-week scenario total", f"{view['Predicted_Weekly_Sales'].sum():,.0f}")
+            st.line_chart(view.set_index("WeekNumber")["Predicted_Weekly_Sales"])
+            st.dataframe(view, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download Forecast CSV", weekly.to_csv(index=False).encode("utf-8"),
+                file_name="weekly_forecast.csv", mime="text/csv"
+            )
+    st.warning(
+        "Illustrative historical-based scenario, not a validated live forecast. "
+        "Assumptions: future Promo=0, StateHoliday=0, SchoolHoliday=0; "
+        "store opening patterns estimated from history."
+    )
+
+# ------------------------ IMPROVED MODEL RESULTS ----------------------------
+with results_tab:
+    st.subheader("Model Performance - Held-out Test Data")
+    csv_path = ROOT / "test_predictions.csv"
+    if not csv_path.exists():
+        st.info("Copy test_predictions.csv from Google Colab into the same folder as app.py.")
+    else:
+        test_results = pd.read_csv(csv_path)
+        needed = {"Store", "Date", "Sales", "Predicted_Sales"}
+        if not needed.issubset(test_results.columns):
+            st.error("test_predictions.csv must have Store, Date, Sales, Predicted_Sales.")
+        else:
+            test_results["Date"] = pd.to_datetime(test_results["Date"], errors="coerce")
+            test_results["Sales"] = pd.to_numeric(test_results["Sales"], errors="coerce")
+            test_results["Predicted_Sales"] = pd.to_numeric(
+                test_results["Predicted_Sales"], errors="coerce"
+            )
+            test_results = test_results.dropna(subset=[
+                "Store", "Date", "Sales", "Predicted_Sales"
+            ])
+            if test_results.empty:
+                st.warning("No valid rows in test_predictions.csv.")
+            else:
+                test_results["Error"] = test_results["Sales"] - test_results["Predicted_Sales"]
+                test_results["Absolute_Error"] = test_results["Error"].abs()
+                test_results["Squared_Error"] = test_results["Error"] ** 2
+
+                # These metrics are computed from the actual held-out rows in the CSV.
+                mae = float(test_results["Absolute_Error"].mean())
+                rmse = float(np.sqrt(test_results["Squared_Error"].mean()))
+                actual = test_results["Sales"].to_numpy(dtype=float)
+                predicted = test_results["Predicted_Sales"].to_numpy(dtype=float)
+                ss_tot = float(np.sum((actual - actual.mean()) ** 2))
+                r2 = 1 - float(np.sum((actual - predicted) ** 2)) / ss_tot if ss_tot else np.nan
+
+                a, b, c, d = st.columns(4)
+                a.metric("MAE", f"{mae:,.2f}")
+                b.metric("RMSE", f"{rmse:,.2f}")
+                c.metric("R² Score", f"{r2:.4f}" if np.isfinite(r2) else "N/A")
+                d.metric("Test Predictions", f"{len(test_results):,}")
+                st.caption(
+                    "Metrics are calculated from test_predictions.csv (held-out predictions). "
+                    "R² measures explained variation, not percentage prediction accuracy. "
+                    "Smaller MAE/RMSE are better."
+                )
+
+                st.markdown("### Actual vs Predicted - Scatter Plot")
+                # Sample only for chart speed; metrics above use ALL valid rows.
+                scatter_data = test_results.sample(
+                    n=min(len(test_results), 1500), random_state=42
+                )
+                fig, ax = plt.subplots(figsize=(8.5, 4.7))
+                ax.scatter(
+                    scatter_data["Sales"], scatter_data["Predicted_Sales"],
+                    alpha=0.35, s=16
+                )
+                low = float(min(scatter_data["Sales"].min(), scatter_data["Predicted_Sales"].min()))
+                high = float(max(scatter_data["Sales"].max(), scatter_data["Predicted_Sales"].max()))
+                ax.plot([low, high], [low, high], linestyle="--", linewidth=2, label="Perfect prediction")
+                ax.set_xlabel("Actual Sales")
+                ax.set_ylabel("Predicted Sales")
+                ax.set_title("Actual vs Predicted Sales")
+                ax.legend()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                st.markdown("### Daily Total Sales: Actual vs Predicted")
+                daily_data = test_results.groupby("Date")[["Sales", "Predicted_Sales"]].sum().sort_index()
+                daily_data = daily_data.rename(columns={
+                    "Sales": "Actual Daily Total", "Predicted_Sales": "Predicted Daily Total"
+                })
+                st.line_chart(daily_data)
+                st.caption("Daily totals aggregate all stores present in the test CSV for each date.")
+
+                st.markdown("### Store-wise Prediction Error")
+                store_mae = test_results.groupby("Store")["Absolute_Error"].mean().sort_values(ascending=False)
+                st.bar_chart(store_mae.head(20))
+                st.caption("Top 20 stores with the highest average absolute error in the test data.")
+
+                st.markdown("### Explore Individual Store Predictions")
+                options = ["All Stores"] + sorted(test_results["Store"].unique().tolist())
+                chosen_store = st.selectbox("Select test store", options, key="results_store")
+                filtered = test_results if chosen_store == "All Stores" else test_results[
+                    test_results["Store"] == chosen_store
+                ]
+                st.dataframe(
+                    filtered[["Store", "Date", "Sales", "Predicted_Sales", "Error", "Absolute_Error"]]
+                    .sort_values(["Store", "Date"]).head(300),
+                    use_container_width=True, hide_index=True
+                )
+                st.download_button(
+                    "Download All Test Predictions + Errors",
+                    test_results[["Store", "Date", "Sales", "Predicted_Sales", "Error", "Absolute_Error"]]
+                    .to_csv(index=False).encode("utf-8"),
+                    file_name="test_predictions_with_errors.csv", mime="text/csv"
+                )
