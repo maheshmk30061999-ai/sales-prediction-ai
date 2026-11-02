@@ -1,0 +1,39 @@
+SALES PREDICTION AI — PORTFOLIO UPDATE
+=======================================
+
+Your live project is ALREADY working. This package improves the crowded
+store-wise chart and adds a professional GitHub README and screenshots.
+
+Repository:
+https://github.com/maheshmk30061999-ai/sales-prediction-ai
+
+1) Open the GitHub repository (branch: main).
+2) Click app.py, then the pencil/Edit icon.
+3) Replace the app.py contents with the app.py in this ZIP.
+4) Commit changes (e.g. "Improve store sales chart: show Top 20 stores").
+   All four tabs are preserved. This updated app.py uses the SAME model.pkl,
+   stores.csv, test_predictions.csv and weekly_forecast.csv schema.
+5) Open README.md, click Edit, replace with README.md from this ZIP,
+   and commit changes.
+6) On the repository homepage, Add file > Upload files.
+   Upload the screenshot image files *inside* a folder named screenshots:
+     screenshots/sales-dashboard.png
+     screenshots/single-day-prediction.png
+     screenshots/12-week-forecast.png
+     screenshots/model-results.png
+   Make sure they appear under screenshots/ (not in repo root).
+7) Do NOT delete/replace your already working model.pkl, stores.csv,
+   test_predictions.csv or weekly_forecast.csv.
+8) Let Streamlit Cloud redeploy; open the live URL and upload the Rossmann
+   train.csv under Sales Dashboard. Verify the new "Top 20 Stores" chart.
+9) Test Predict Sales, 12-Week Forecast and Model Results afterwards.
+
+IMPORTANT:
+- These screenshot PNGs are copied from your earlier PDF exports.
+  They document your running app before the Top 20 chart improvement.
+  After deployment, you may optionally capture an updated screenshot.
+- No changes were made to your GitHub repository by this package.
+- If deployment fails, use Streamlit Cloud's Manage app > Logs.
+
+The site link is:
+https://sales-prediction-ai-k376thmymqszdcpioenwvo.streamlit.app/
